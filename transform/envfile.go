@@ -22,6 +22,14 @@ import (
 	"github.com/compose-spec/compose-go/v2/tree"
 )
 
+// CanonicalEnvFile canonicalizes an env_file value into a list of
+// {path, required} objects, with required defaulting to true. It is exported
+// for callers that decode env_file outside Canonical's document walk, such as
+// include, which is resolved before that walk runs.
+func CanonicalEnvFile(data any, p tree.Path, ignoreParseError bool) (any, error) {
+	return transformEnvFile(data, p, ignoreParseError)
+}
+
 func transformEnvFile(data any, p tree.Path, _ bool) (any, error) {
 	switch v := data.(type) {
 	case string:

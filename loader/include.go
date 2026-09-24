@@ -30,6 +30,7 @@ import (
 	"github.com/compose-spec/compose-go/v2/dotenv"
 	interp "github.com/compose-spec/compose-go/v2/interpolation"
 	"github.com/compose-spec/compose-go/v2/override"
+	"github.com/compose-spec/compose-go/v2/transform"
 	"github.com/compose-spec/compose-go/v2/tree"
 	"github.com/compose-spec/compose-go/v2/types"
 )
@@ -85,9 +86,18 @@ func loadIncludeConfig(source any) ([]types.IncludeConfig, error) {
 		return nil, fmt.Errorf("`include` must be a list, got %s", source)
 	}
 	for i, config := range configs {
-		if v, ok := config.(string); ok {
+		switch v := config.(type) {
+		case string:
 			configs[i] = map[string]any{
 				"path": v,
+			}
+		case map[string]any:
+			if ef, ok := v["env_file"]; ok {
+				normalized, err := transform.CanonicalEnvFile(ef, tree.NewPath("include", "[]", "env_file"), false)
+				if err != nil {
+					return nil, err
+				}
+				v["env_file"] = normalized
 			}
 		}
 	}
@@ -158,35 +168,52 @@ func ApplyInclude(ctx context.Context, workingDir string, environment types.Mapp
 			WorkingDir: r.ProjectDirectory,
 		})
 
+		var envFiles []types.EnvFile
 		if len(r.EnvFile) == 0 {
 			f := filepath.Join(r.ProjectDirectory, ".env")
 			if s, err := os.Stat(f); err == nil && !s.IsDir() {
-				r.EnvFile = types.StringList{f}
+				envFiles = []types.EnvFile{{Path: f}}
 			}
 		} else {
-			envFile := []string{}
-			for _, f := range r.EnvFile {
+			for _, envFile := range r.EnvFile {
+				f := envFile.Path
 				if f == "/dev/null" {
 					continue
 				}
 				if !filepath.IsAbs(f) {
 					f = filepath.Join(workingDir, f)
-					s, err := os.Stat(f)
-					if err != nil {
-						return err
-					}
-					if s.IsDir() {
-						return fmt.Errorf("%s is not a file", f)
-					}
 				}
-				envFile = append(envFile, f)
+				s, err := os.Stat(f)
+				if os.IsNotExist(err) {
+					if envFile.Required {
+						return fmt.Errorf("env file %s not found: %w", f, err)
+					}
+					continue
+				}
+				if err != nil {
+					return err
+				}
+				if s.IsDir() {
+					return fmt.Errorf("%s is not a file", f)
+				}
+				envFile.Path = f
+				envFiles = append(envFiles, envFile)
 			}
-			r.EnvFile = envFile
 		}
 
-		envFromFile, err := dotenv.GetEnvFromFile(environment, r.EnvFile)
-		if err != nil {
-			return err
+		envFromFile := types.Mapping{}
+		for _, envFile := range envFiles {
+			err := loadIncludeEnvFile(envFile, envFromFile, func(k string) (string, bool) {
+				// environment has precedence over values read from env files
+				if v, ok := environment[k]; ok {
+					return v, true
+				}
+				v, ok := envFromFile[k]
+				return v, ok
+			})
+			if err != nil {
+				return err
+			}
 		}
 
 		config := types.ConfigDetails{
@@ -223,6 +250,16 @@ func ApplyInclude(ctx context.Context, workingDir string, environment types.Mapp
 	}
 	delete(model, "include")
 	return nil
+}
+
+func loadIncludeEnvFile(envFile types.EnvFile, vars types.Mapping, resolve dotenv.LookupFn) error {
+	file, err := os.Open(envFile.Path)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	return dotenv.ParseWithFormat(file, envFile.Path, vars, resolve, envFile.Format)
 }
 
 // importResources import into model all resources defined by imported, and report error on conflict
