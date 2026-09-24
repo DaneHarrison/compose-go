@@ -896,5 +896,5 @@ func (s ConfigObjConfig) MarshalJSON() ([]byte, error) {
 type IncludeConfig struct {
 	Path             StringList `yaml:"path,omitempty" json:"path,omitempty"`
 	ProjectDirectory string     `yaml:"project_directory,omitempty" json:"project_directory,omitempty"`
-	EnvFile          StringList `yaml:"env_file,omitempty" json:"env_file,omitempty"`
+	EnvFile          []EnvFile  `yaml:"env_file,omitempty" json:"env_file,omitempty"`
 }

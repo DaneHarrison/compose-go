@@ -1644,7 +1644,7 @@
               "description": "Path to the Compose application or sub-project files to include."
             },
             "env_file": {
-              "$ref": "#/$defs/string_or_list",
+              "$ref": "#/$defs/env_file",
               "description": "Path to the environment files to use to define default values when interpolating variables in the Compose files being parsed."
             },
             "project_directory": {
